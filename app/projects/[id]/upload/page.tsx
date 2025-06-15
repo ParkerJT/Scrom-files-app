@@ -1,9 +1,9 @@
 "use client"
 
 import type React from "react"
-
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, use, useRef } from "react"
 import { useRouter } from "next/navigation"
+import { useUser } from "@auth0/nextjs-auth0/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -12,18 +12,65 @@ import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 
 interface UploadPageProps {
-  params: {
+  params: Promise<{
     id: string
-  }
+  }>
 }
 
 export default function UploadPage({ params }: UploadPageProps) {
+  // Unwrap the async params using React.use()
+  const resolvedParams = use(params)
+  const projectId = resolvedParams.id
+
+  const { user, isLoading: userLoading } = useUser()
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [dragActive, setDragActive] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
+
+  // Create a ref for the file input
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!userLoading && !user) {
+      router.push("/api/auth/login")
+    }
+  }, [user, userLoading, router])
+
+  // Function to trigger file input
+  const triggerFileInput = () => {
+    console.log("Triggering file input...")
+    if (fileInputRef.current) {
+      fileInputRef.current.click()
+    } else {
+      console.error("File input ref is null")
+    }
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("File input changed")
+    const files = e.target.files
+    if (files && files[0]) {
+      const selectedFile = files[0]
+      console.log("Selected file:", selectedFile.name, selectedFile.type, selectedFile.size)
+
+      if (selectedFile.name.toLowerCase().endsWith(".zip")) {
+        setFile(selectedFile)
+        toast({
+          title: "File selected",
+          description: `Selected: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`,
+        })
+      } else {
+        toast({
+          title: "Invalid file type",
+          description: "Please select a ZIP file containing your SCORM package.",
+          variant: "destructive",
+        })
+      }
+    }
+  }
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -41,11 +88,18 @@ export default function UploadPage({ params }: UploadPageProps) {
       e.stopPropagation()
       setDragActive(false)
 
+      console.log("File dropped")
       const files = e.dataTransfer.files
       if (files && files[0]) {
         const selectedFile = files[0]
-        if (selectedFile.name.endsWith(".zip")) {
+        console.log("Dropped file:", selectedFile.name, selectedFile.type, selectedFile.size)
+
+        if (selectedFile.name.toLowerCase().endsWith(".zip")) {
           setFile(selectedFile)
+          toast({
+            title: "File dropped",
+            description: `Selected: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`,
+          })
         } else {
           toast({
             title: "Invalid file type",
@@ -58,40 +112,41 @@ export default function UploadPage({ params }: UploadPageProps) {
     [toast],
   )
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (files && files[0]) {
-      const selectedFile = files[0]
-      if (selectedFile.name.endsWith(".zip")) {
-        setFile(selectedFile)
-      } else {
-        toast({
-          title: "Invalid file type",
-          description: "Please select a ZIP file containing your SCORM package.",
-          variant: "destructive",
-        })
-      }
-    }
-  }
-
   const handleUpload = async () => {
     if (!file) return
 
+    console.log("Starting upload for file:", file.name)
     setUploading(true)
     setUploadProgress(0)
 
     try {
       const formData = new FormData()
       formData.append("file", file)
-      formData.append("projectId", params.id)
+      formData.append("projectId", projectId)
 
+      // Simulate progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval)
+            return prev
+          }
+          return prev + 10
+        })
+      }, 200)
+
+      console.log("Sending upload request...")
       const response = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       })
 
+      clearInterval(progressInterval)
+      console.log("Upload response status:", response.status)
+
       if (response.ok) {
         const result = await response.json()
+        console.log("Upload successful:", result)
         setUploadProgress(100)
         toast({
           title: "Upload successful!",
@@ -103,9 +158,11 @@ export default function UploadPage({ params }: UploadPageProps) {
         }, 2000)
       } else {
         const error = await response.json()
-        throw new Error(error.message)
+        console.error("Upload failed:", error)
+        throw new Error(error.error || "Upload failed")
       }
     } catch (error) {
+      console.error("Upload error:", error)
       toast({
         title: "Upload failed",
         description: error instanceof Error ? error.message : "Failed to upload file",
@@ -114,6 +171,14 @@ export default function UploadPage({ params }: UploadPageProps) {
     } finally {
       setUploading(false)
     }
+  }
+
+  if (userLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
   }
 
   return (
@@ -138,24 +203,59 @@ export default function UploadPage({ params }: UploadPageProps) {
             </CardHeader>
             <CardContent className="space-y-6">
               {!file ? (
-                <div
-                  className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                    dragActive ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
-                  }`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">Drop your SCORM ZIP file here</h3>
-                  <p className="text-gray-600 mb-4">or click to browse and select a file</p>
-                  <input type="file" accept=".zip" onChange={handleFileSelect} className="hidden" id="file-upload" />
-                  <label htmlFor="file-upload">
-                    <Button variant="outline" className="cursor-pointer">
+                <div className="space-y-4">
+                  {/* Debug info */}
+                  <div className="mb-4 p-2 bg-gray-100 rounded text-xs">
+                    <strong>Debug:</strong> Project ID: {projectId}
+                  </div>
+
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".zip"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                    id="file-upload"
+                  />
+
+                  {/* Click area */}
+                  <div
+                    className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
+                      dragActive ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
+                    }`}
+                    onClick={triggerFileInput}
+                    onDragEnter={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDragOver={handleDrag}
+                    onDrop={handleDrop}
+                  >
+                    <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">Drop your SCORM ZIP file here</h3>
+                    <p className="text-gray-600 mb-4">or click anywhere in this area to browse and select a file</p>
+
+                    <Button
+                      variant="outline"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        triggerFileInput()
+                      }}
+                    >
                       Browse Files
                     </Button>
-                  </label>
+                  </div>
+
+                  {/* Alternative direct file input (visible) */}
+                  <div className="border rounded-lg p-4 bg-gray-50">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Or use this file selector:</label>
+                    <input
+                      type="file"
+                      accept=".zip"
+                      onChange={handleFileSelect}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">

@@ -26,6 +26,7 @@ interface UserData {
   plan: "free" | "pro"
   projectCount: number
   maxProjects: number
+  canCreateProject: boolean
 }
 
 export default function DashboardPage() {
@@ -54,11 +55,11 @@ export default function DashboardPage() {
       if (response.ok) {
         const data = await response.json()
         setProjects(data)
+      } else {
+        console.error("Failed to fetch projects:", response.status)
       }
     } catch (error) {
       console.error("Error fetching projects:", error)
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -68,9 +69,14 @@ export default function DashboardPage() {
       if (response.ok) {
         const data = await response.json()
         setUserData(data)
+        console.log("User data:", data) // Debug log
+      } else {
+        console.error("Failed to fetch user data:", response.status)
       }
     } catch (error) {
       console.error("Error fetching user data:", error)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -84,6 +90,8 @@ export default function DashboardPage() {
 
       if (response.ok) {
         setProjects(projects.filter((p) => p._id !== projectId))
+        // Refresh user data to update project count
+        fetchUserData()
         toast({
           title: "Project deleted",
           description: "Your project has been successfully deleted.",
@@ -97,8 +105,6 @@ export default function DashboardPage() {
       })
     }
   }
-
-  const canCreateProject = userData && userData.projectCount < userData.maxProjects
 
   if (isLoading || loading) {
     return (
@@ -141,7 +147,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Your Projects</h1>
             <p className="text-gray-600 mt-2">
-              {userData && `${userData.projectCount} of ${userData.maxProjects} projects used`}
+              {userData ? `${userData.projectCount} of ${userData.maxProjects} projects used` : "Loading..."}
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -150,7 +156,7 @@ export default function DashboardPage() {
                 {userData.plan === "pro" ? "Pro Plan" : "Free Plan"}
               </Badge>
             )}
-            {canCreateProject ? (
+            {userData?.canCreateProject ? (
               <Link href="/projects/new">
                 <Button className="flex items-center gap-2">
                   <Plus className="h-4 w-4" />
@@ -174,7 +180,7 @@ export default function DashboardPage() {
               <Upload className="h-16 w-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-xl font-semibold mb-2">No projects yet</h3>
               <p className="text-gray-600 mb-6">Create your first project to start uploading SCORM files.</p>
-              {canCreateProject ? (
+              {userData?.canCreateProject ? (
                 <Link href="/projects/new">
                   <Button>Create Your First Project</Button>
                 </Link>

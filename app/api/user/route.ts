@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
     })
 
     if (!user) {
-      user = {
+      // Create new user with free plan
+      const newUser = {
         auth0Id: session.user.sub,
         email: session.user.email,
         name: session.user.name,
@@ -26,7 +27,9 @@ export async function GET(request: NextRequest) {
         createdAt: new Date(),
         updatedAt: new Date(),
       }
-      await db.collection("users").insertOne(user)
+
+      const result = await db.collection("users").insertOne(newUser)
+      user = { ...newUser, _id: result.insertedId }
     }
 
     // Count user's projects
@@ -40,6 +43,7 @@ export async function GET(request: NextRequest) {
       plan: user.plan,
       projectCount,
       maxProjects,
+      canCreateProject: projectCount < maxProjects,
     })
   } catch (error) {
     console.error("Error fetching user data:", error)
