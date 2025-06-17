@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation"
 import { useUser } from "@auth0/nextjs-auth0/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
-import { ArrowLeft, Upload, FileText, CheckCircle } from "lucide-react"
+import { ArrowLeft, Upload, FileText, CheckCircle, Loader2, FileArchive, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 
@@ -17,6 +16,18 @@ interface UploadPageProps {
   }>
 }
 
+interface UploadResult {
+  success: boolean
+  packageId: string
+  packageFolder: string
+  manifestUrl: string
+  launchUrl: string
+  totalFiles: number
+  files: { key: string; url: string }[]
+}
+
+type UploadStage = "idle" | "uploading" | "extracting" | "processing" | "finalizing" | "complete"
+
 export default function UploadPage({ params }: UploadPageProps) {
   // Unwrap the async params using React.use()
   const resolvedParams = use(params)
@@ -25,8 +36,10 @@ export default function UploadPage({ params }: UploadPageProps) {
   const { user, isLoading: userLoading } = useUser()
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadStage, setUploadStage] = useState<UploadStage>("idle")
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [dragActive, setDragActive] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -38,6 +51,40 @@ export default function UploadPage({ params }: UploadPageProps) {
       router.push("/api/auth/login")
     }
   }, [user, userLoading, router])
+
+  const getStageMessage = (stage: UploadStage) => {
+    switch (stage) {
+      case "uploading":
+        return "Uploading SCORM package..."
+      case "extracting":
+        return "Extracting ZIP file..."
+      case "processing":
+        return "Processing SCORM files..."
+      case "finalizing":
+        return "Finalizing upload..."
+      case "complete":
+        return "Upload completed successfully!"
+      default:
+        return ""
+    }
+  }
+
+  const getStageProgress = (stage: UploadStage) => {
+    switch (stage) {
+      case "uploading":
+        return 25
+      case "extracting":
+        return 50
+      case "processing":
+        return 75
+      case "finalizing":
+        return 90
+      case "complete":
+        return 100
+      default:
+        return 0
+    }
+  }
 
   // Function to trigger file input
   const triggerFileInput = () => {
@@ -58,6 +105,7 @@ export default function UploadPage({ params }: UploadPageProps) {
 
       if (selectedFile.name.toLowerCase().endsWith(".zip")) {
         setFile(selectedFile)
+        setError(null)
         toast({
           title: "File selected",
           description: `Selected: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`,
@@ -96,6 +144,7 @@ export default function UploadPage({ params }: UploadPageProps) {
 
         if (selectedFile.name.toLowerCase().endsWith(".zip")) {
           setFile(selectedFile)
+          setError(null)
           toast({
             title: "File dropped",
             description: `Selected: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)`,
@@ -117,23 +166,36 @@ export default function UploadPage({ params }: UploadPageProps) {
 
     console.log("Starting upload for file:", file.name)
     setUploading(true)
-    setUploadProgress(0)
+    setError(null)
+    setUploadResult(null)
+    setUploadStage("uploading")
 
     try {
       const formData = new FormData()
       formData.append("scormPackage", file)
       formData.append("projectId", projectId)
 
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 90) {
-            clearInterval(progressInterval)
-            return prev
-          }
-          return prev + 10
-        })
-      }, 200)
+      // Stage progression with realistic timing
+      const stageProgression = [
+        { stage: "uploading" as UploadStage, delay: 500 },
+        { stage: "extracting" as UploadStage, delay: 1000 },
+        { stage: "processing" as UploadStage, delay: 1500 },
+        { stage: "finalizing" as UploadStage, delay: 500 },
+      ]
+
+      // Start stage progression
+      let currentStageIndex = 0
+      const progressStages = () => {
+        if (currentStageIndex < stageProgression.length) {
+          const { stage, delay } = stageProgression[currentStageIndex]
+          setTimeout(() => {
+            setUploadStage(stage)
+            currentStageIndex++
+            progressStages()
+          }, delay)
+        }
+      }
+      progressStages()
 
       console.log("Sending upload request...")
       const response = await fetch("/api/upload-scorm", {
@@ -141,32 +203,34 @@ export default function UploadPage({ params }: UploadPageProps) {
         body: formData,
       })
 
-      clearInterval(progressInterval)
       console.log("Upload response status:", response.status)
 
       if (response.ok) {
         const result = await response.json()
         console.log("Upload successful:", result)
-        setUploadProgress(100)
+        setUploadStage("complete")
+        setUploadResult(result)
         toast({
           title: "Upload successful!",
-          description: `SCORM package extracted with ${result.totalFiles} files. Launch URL: ${result.launchUrl}`,
+          description: `SCORM package extracted with ${result.totalFiles} files.`,
         })
 
-        // Optionally redirect to a results page or show the URLs
+        // Redirect to dashboard after showing results
         setTimeout(() => {
           router.push("/dashboard")
-        }, 2000)
+        }, 3000)
       } else {
         const error = await response.json()
         console.error("Upload failed:", error)
         throw new Error(error.error || "Upload failed")
       }
-    } catch (error) {
-      console.error("Upload error:", error)
+    } catch (err) {
+      console.error("Upload error:", err)
+      setError(err instanceof Error ? err.message : "Failed to upload file")
+      setUploadStage("idle")
       toast({
         title: "Upload failed",
-        description: error instanceof Error ? error.message : "Failed to upload file",
+        description: err instanceof Error ? err.message : "Failed to upload file",
         variant: "destructive",
       })
     } finally {
@@ -194,10 +258,13 @@ export default function UploadPage({ params }: UploadPageProps) {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-4xl mx-auto space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Upload SCORM File</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <FileArchive className="h-6 w-6" />
+                Upload SCORM File
+              </CardTitle>
               <CardDescription>
                 Upload a ZIP file containing your SCORM package. We'll extract and host it for you.
               </CardDescription>
@@ -220,7 +287,7 @@ export default function UploadPage({ params }: UploadPageProps) {
                     id="file-upload"
                   />
 
-                  {/* Click area */}
+                  {/* Main upload area */}
                   <div
                     className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
                       dragActive ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
@@ -232,22 +299,16 @@ export default function UploadPage({ params }: UploadPageProps) {
                     onDrop={handleDrop}
                   >
                     <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">Drop your SCORM ZIP file here</h3>
-                    <p className="text-gray-600 mb-4">or click anywhere in this area to browse and select a file</p>
-
-                    <Button
-                      variant="outline"
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        triggerFileInput()
-                      }}
-                    >
-                      Browse Files
-                    </Button>
+                    <div className="space-y-2">
+                      <h3 className="text-lg font-semibold">Choose SCORM Package</h3>
+                      <p className="text-gray-600">Drop your SCORM ZIP file here or click to browse</p>
+                      <Button variant="outline" type="button" onClick={(e) => e.stopPropagation()}>
+                        Browse Files
+                      </Button>
+                    </div>
                   </div>
 
-                  {/* Alternative direct file input (visible) */}
+                  {/* Alternative file input */}
                   <div className="border rounded-lg p-4 bg-gray-50">
                     <label className="block text-sm font-medium text-gray-700 mb-2">Or use this file selector:</label>
                     <input
@@ -274,25 +335,48 @@ export default function UploadPage({ params }: UploadPageProps) {
                   </div>
 
                   {uploading && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span>Uploading...</span>
-                        <span>{uploadProgress}%</span>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                        <span className="text-sm font-medium">{getStageMessage(uploadStage)}</span>
                       </div>
-                      <Progress value={uploadProgress} />
+
+                      {/* Stage indicators */}
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span className={uploadStage === "uploading" ? "text-blue-600 font-medium" : ""}>Upload</span>
+                        <span className={uploadStage === "extracting" ? "text-blue-600 font-medium" : ""}>Extract</span>
+                        <span className={uploadStage === "processing" ? "text-blue-600 font-medium" : ""}>Process</span>
+                        <span className={uploadStage === "finalizing" ? "text-blue-600 font-medium" : ""}>
+                          Finalize
+                        </span>
+                      </div>
+
+                      {/* Visual progress bar */}
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-500 ease-out"
+                          style={{ width: `${getStageProgress(uploadStage)}%` }}
+                        />
+                      </div>
                     </div>
                   )}
 
-                  {uploadProgress === 100 ? (
+                  {error && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <p className="text-red-800">{error}</p>
+                    </div>
+                  )}
+
+                  {uploadStage === "complete" ? (
                     <div className="flex items-center gap-2 text-green-600">
                       <CheckCircle className="h-5 w-5" />
-                      <span>Upload completed successfully!</span>
+                      <span>Upload completed successfully! Redirecting to dashboard...</span>
                     </div>
-                  ) : (
-                    <Button onClick={handleUpload} disabled={uploading} className="w-full">
-                      {uploading ? "Uploading..." : "Upload SCORM File"}
+                  ) : !uploading ? (
+                    <Button onClick={handleUpload} className="w-full">
+                      Upload SCORM File
                     </Button>
-                  )}
+                  ) : null}
                 </div>
               )}
 
@@ -307,6 +391,82 @@ export default function UploadPage({ params }: UploadPageProps) {
               </div>
             </CardContent>
           </Card>
+
+          {/* Upload Results Card */}
+          {uploadResult && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CheckCircle className="h-6 w-6 text-green-500" />
+                  Upload Successful
+                </CardTitle>
+                <CardDescription>Your SCORM package has been extracted and uploaded to Cloudflare R2</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Package ID</p>
+                    <p className="text-sm text-gray-600 font-mono">{uploadResult.packageId}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Total Files</p>
+                    <p className="text-sm text-gray-600">{uploadResult.totalFiles} files extracted</p>
+                  </div>
+                </div>
+
+                {uploadResult.launchUrl && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Launch URL</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-gray-100 p-2 rounded text-sm break-all">{uploadResult.launchUrl}</code>
+                      <Button size="sm" variant="outline" onClick={() => window.open(uploadResult.launchUrl, "_blank")}>
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {uploadResult.manifestUrl && uploadResult.manifestUrl !== uploadResult.launchUrl && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Manifest URL</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-gray-100 p-2 rounded text-sm break-all">
+                        {uploadResult.manifestUrl}
+                      </code>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => window.open(uploadResult.manifestUrl, "_blank")}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <details className="space-y-2">
+                  <summary className="text-sm font-medium cursor-pointer">
+                    View All Files ({uploadResult.totalFiles})
+                  </summary>
+                  <div className="max-h-60 overflow-y-auto space-y-1">
+                    {uploadResult.files.map((file, index) => (
+                      <div key={index} className="flex items-center justify-between text-xs">
+                        <span className="font-mono text-gray-600 break-all">{file.key}</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => window.open(file.url, "_blank")}
+                          className="h-6 px-2 ml-2 flex-shrink-0"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </main>
     </div>

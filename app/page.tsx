@@ -5,7 +5,6 @@ import { useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import ScormUploader from "@/components/scorm-uploader"
 import { Upload, BookOpen, User, LogOut } from "lucide-react"
 
 export default function HomePage() {
@@ -149,7 +148,22 @@ export default function HomePage() {
           </Card>
         )}
 
-        {activeTab === "upload" && <ScormUploader />}
+        {activeTab === "upload" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Upload New SCORM Package</CardTitle>
+              <CardDescription>Create a new project and upload your SCORM content</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/dashboard">
+                <Button size="lg" className="w-full">
+                  <Upload className="h-5 w-5 mr-2" />
+                  Go to Dashboard to Upload
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   )

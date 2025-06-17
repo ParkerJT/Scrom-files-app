@@ -5,20 +5,29 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Upload, ExternalLink, Trash2, Crown } from "lucide-react"
+import { Plus, Upload, Trash2, Crown, Play, FileText, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
+
+interface ScormFile {
+  filename: string
+  packageId: string
+  packageFolder: string
+  publicUrl: string
+  manifestUrl?: string
+  launchUrl?: string
+  launchFile?: string
+  totalFiles: number
+  uploadedAt: string
+  fileSize: number
+}
 
 interface Project {
   _id: string
   name: string
   description: string
-  scormFile?: {
-    filename: string
-    publicUrl: string
-    uploadedAt: string
-  }
+  scormFile?: ScormFile
   createdAt: string
 }
 
@@ -54,6 +63,7 @@ export default function DashboardPage() {
       const response = await fetch("/api/projects")
       if (response.ok) {
         const data = await response.json()
+        console.log("Fetched projects:", data) // Debug log
         setProjects(data)
       } else {
         console.error("Failed to fetch projects:", response.status)
@@ -104,6 +114,21 @@ export default function DashboardPage() {
         variant: "destructive",
       })
     }
+  }
+
+  const formatFileSize = (bytes: number) => {
+    return (bytes / 1024 / 1024).toFixed(2) + " MB"
+  }
+
+  const getMainUrl = (scormFile: ScormFile) => {
+    // Prioritize launch URL, then public URL, then manifest URL
+    return scormFile.launchUrl || scormFile.publicUrl || scormFile.manifestUrl || ""
+  }
+
+  const getUrlLabel = (scormFile: ScormFile) => {
+    if (scormFile.launchUrl) return "Launch SCORM"
+    if (scormFile.publicUrl) return "View Content"
+    return "View Manifest"
   }
 
   if (isLoading || loading) {
@@ -216,23 +241,49 @@ export default function DashboardPage() {
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <Upload className="h-4 w-4" />
-                        {project.scormFile.filename}
+                        <div>
+                          <div className="font-medium">{project.scormFile.filename}</div>
+                          <div className="text-xs text-gray-500">
+                            {formatFileSize(project.scormFile.fileSize)} • {project.scormFile.totalFiles} files
+                            {project.scormFile.launchFile && <span> • Launch: {project.scormFile.launchFile}</span>}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Link href={project.scormFile.publicUrl} target="_blank">
-                          <Button size="sm" variant="outline" className="flex items-center gap-1">
-                            <ExternalLink className="h-3 w-3" />
-                            View
+
+                      <div className="flex gap-2 flex-wrap">
+                        {/* Main Launch/View Button */}
+                        <Link href={getMainUrl(project.scormFile)} target="_blank">
+                          <Button size="sm" className="flex items-center gap-1">
+                            {project.scormFile.launchUrl ? (
+                              <Play className="h-3 w-3" />
+                            ) : (
+                              <ExternalLink className="h-3 w-3" />
+                            )}
+                            {getUrlLabel(project.scormFile)}
                           </Button>
                         </Link>
+
+                        {/* Manifest Button (if different from main URL) */}
+                        {project.scormFile.manifestUrl &&
+                          project.scormFile.manifestUrl !== getMainUrl(project.scormFile) && (
+                            <Link href={project.scormFile.manifestUrl} target="_blank">
+                              <Button size="sm" variant="outline" className="flex items-center gap-1">
+                                <FileText className="h-3 w-3" />
+                                Manifest
+                              </Button>
+                            </Link>
+                          )}
+
+                        {/* Copy URL Button */}
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            navigator.clipboard.writeText(project.scormFile!.publicUrl)
+                            const urlToCopy = getMainUrl(project.scormFile!)
+                            navigator.clipboard.writeText(urlToCopy)
                             toast({
                               title: "URL copied!",
-                              description: "The public URL has been copied to your clipboard.",
+                              description: "The SCORM URL has been copied to your clipboard.",
                             })
                           }}
                         >
@@ -249,6 +300,9 @@ export default function DashboardPage() {
                   )}
                   <div className="text-xs text-gray-500 mt-3">
                     Created {new Date(project.createdAt).toLocaleDateString()}
+                    {project.scormFile && (
+                      <span> • Uploaded {new Date(project.scormFile.uploadedAt).toLocaleDateString()}</span>
+                    )}
                   </div>
                 </CardContent>
               </Card>
