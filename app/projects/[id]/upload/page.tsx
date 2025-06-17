@@ -121,7 +121,7 @@ export default function UploadPage({ params }: UploadPageProps) {
 
     try {
       const formData = new FormData()
-      formData.append("file", file)
+      formData.append("scormPackage", file)
       formData.append("projectId", projectId)
 
       // Simulate progress
@@ -136,7 +136,7 @@ export default function UploadPage({ params }: UploadPageProps) {
       }, 200)
 
       console.log("Sending upload request...")
-      const response = await fetch("/api/upload", {
+      const response = await fetch("/api/upload-scorm", {
         method: "POST",
         body: formData,
       })
@@ -150,9 +150,10 @@ export default function UploadPage({ params }: UploadPageProps) {
         setUploadProgress(100)
         toast({
           title: "Upload successful!",
-          description: "Your SCORM file has been uploaded and is ready to use.",
+          description: `SCORM package extracted with ${result.totalFiles} files. Launch URL: ${result.launchUrl}`,
         })
 
+        // Optionally redirect to a results page or show the URLs
         setTimeout(() => {
           router.push("/dashboard")
         }, 2000)
